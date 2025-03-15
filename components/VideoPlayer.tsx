@@ -14,20 +14,31 @@ interface TimeRange {
 
 interface VideoPlayerProps {
   videoId: string;
-  onVideoChange?: (videoId: string) => void;
+  onVideoChange: (videoId: string) => void;
+  onClipSaved?: () => void; // Optional callback when a clip is saved
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange, onClipSaved }) => {
   const [player, setPlayer] = useState<YouTubePlayer | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [timeRange, setTimeRange] = useState<TimeRange>({ start: 0, end: 0 });
+  const [startTimeInput, setStartTimeInput] = useState<string>("00:00");
+  const [endTimeInput, setEndTimeInput] = useState<string>("00:00");
   const [isLooping, setIsLooping] = useState<boolean>(true);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [refreshClipsList, setRefreshClipsList] = useState<number>(Date.now());
+  const [overwriteMode, setOverwriteMode] = useState<boolean>(false);
+  const [currentClipId, setCurrentClipId] = useState<string | null>(null);
   const checkInterval = useRef<NodeJS.Timeout | null>(null);
   const saveMessageTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Update input fields when timeRange changes
+  useEffect(() => {
+    setStartTimeInput(formatTime(timeRange.start));
+    setEndTimeInput(formatTime(timeRange.end));
+  }, [timeRange.start, timeRange.end]);
 
   // Handle player ready event
   const handleReady = (event: YouTubeEvent) => {
@@ -50,6 +61,88 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
       // Video ended, restart from start point
       event.target.seekTo(timeRange.start);
       event.target.playVideo();
+    }
+  };
+
+  // Parse time string to seconds
+  const parseTimeString = (timeString: string): number | null => {
+    try {
+      // Handle MM:SS format (e.g., "04:34")
+      if (/^\d{1,2}:\d{2}$/.test(timeString)) {
+        const [minutes, seconds] = timeString.split(':').map(part => parseInt(part, 10));
+        return minutes * 60 + seconds;
+      }
+      // Handle HH:MM:SS format (e.g., "01:04:34")
+      else if (/^\d{1,2}:\d{2}:\d{2}$/.test(timeString)) {
+        const [hours, minutes, seconds] = timeString.split(':').map(part => parseInt(part, 10));
+        return hours * 3600 + minutes * 60 + seconds;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error parsing time:', error);
+      return null;
+    }
+  };
+
+  // Handle start time input change
+  const handleStartTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setStartTimeInput(newValue);
+    
+    // Only update the actual time range if the input is a valid time format
+    const seconds = parseTimeString(newValue);
+    if (seconds !== null && seconds >= 0 && seconds < timeRange.end) {
+      setTimeRange(prev => ({
+        ...prev,
+        start: seconds
+      }));
+    }
+  };
+
+  // Handle end time input change
+  const handleEndTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setEndTimeInput(newValue);
+    
+    // Only update the actual time range if the input is a valid time format
+    const seconds = parseTimeString(newValue);
+    if (seconds !== null && seconds > timeRange.start && seconds <= duration) {
+      setTimeRange(prev => ({
+        ...prev,
+        end: seconds
+      }));
+    }
+  };
+
+  // Handle input blur to format time correctly
+  const handleTimeInputBlur = (inputType: 'start' | 'end') => {
+    if (inputType === 'start') {
+      setStartTimeInput(formatTime(timeRange.start));
+    } else {
+      setEndTimeInput(formatTime(timeRange.end));
+    }
+  };
+
+  // Handle arrow key presses in time inputs
+  const handleTimeInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, inputType: 'start' | 'end') => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      
+      const increment = e.key === 'ArrowUp' ? 1 : -1;
+      
+      if (inputType === 'start') {
+        const newTime = Math.max(0, Math.min(timeRange.start + increment, timeRange.end - 1));
+        setTimeRange(prev => ({
+          ...prev,
+          start: newTime
+        }));
+      } else {
+        const newTime = Math.max(timeRange.start + 1, Math.min(timeRange.end + increment, duration));
+        setTimeRange(prev => ({
+          ...prev,
+          end: newTime
+        }));
+      }
     }
   };
 
@@ -94,12 +187,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
   };
 
   // Save current clip
-  const handleSaveClip = () => {
-    const clipId = generateClipId(videoId, timeRange.start, timeRange.end);
+  const handleSaveClip = async () => {
+    // Generate a clip ID or use the current one if in overwrite mode
+    const clipId = overwriteMode && currentClipId 
+      ? currentClipId 
+      : generateClipId(videoId, timeRange.start, timeRange.end);
+    
+    // Get the actual video title
+    const title = await getVideoTitle(videoId);
+    
     const clip: SavedClip = {
       id: clipId,
       videoId,
-      title: getVideoTitle(videoId),
+      title,
       startTime: timeRange.start,
       endTime: timeRange.end,
       thumbnailUrl: getThumbnailUrl(videoId),
@@ -108,8 +208,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
     
     saveClip(clip);
     
+    // If we're saving a new clip, set it as the current clip
+    if (!overwriteMode || !currentClipId) {
+      setCurrentClipId(clipId);
+    }
+    
     // Trigger refresh of the clips list
     setRefreshClipsList(Date.now());
+    
+    // Call the onClipSaved callback if provided
+    if (onClipSaved) {
+      onClipSaved();
+    }
     
     // Show success message briefly
     setSaveSuccess(true);
@@ -125,12 +235,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
 
   // Load a saved clip
   const handleSelectClip = (clip: SavedClip) => {
+    // Store the clip ID for potential overwriting
+    setCurrentClipId(clip.id);
+    
     if (clip.videoId === videoId) {
       // Same video, just update time range
       setTimeRange({
         start: clip.startTime,
         end: clip.endTime
       });
+      
+      // Explicitly update the input fields
+      setStartTimeInput(formatTime(clip.startTime));
+      setEndTimeInput(formatTime(clip.endTime));
       
       if (player) {
         player.seekTo(clip.startTime);
@@ -143,6 +260,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
         // The time range will be set when the new video loads
         // We'll store the clip info to apply after loading
         sessionStorage.setItem('pendingClip', JSON.stringify({
+          id: clip.id,
           startTime: clip.startTime,
           endTime: clip.endTime
         }));
@@ -164,13 +282,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
           e.preventDefault();
           restartVideo();
           break;
-        case 'ArrowLeft': // Left arrow
-          e.preventDefault();
-          player.seekTo(Math.max(0, player.getCurrentTime() - 5));
+        case 'ArrowLeft': // Ctrl + Left arrow
+          if (e.ctrlKey) {
+            e.preventDefault();
+            player.seekTo(Math.max(0, player.getCurrentTime() - 5));
+          }
           break;
-        case 'ArrowRight': // Right arrow
-          e.preventDefault();
-          player.seekTo(Math.min(duration, player.getCurrentTime() + 5));
+        case 'ArrowRight': // Ctrl + Right arrow
+          if (e.ctrlKey) {
+            e.preventDefault();
+            player.seekTo(Math.min(duration, player.getCurrentTime() + 5));
+          }
           break;
         default:
           break;
@@ -202,6 +324,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
           start: pendingClip.startTime,
           end: pendingClip.endTime
         });
+        
+        // Explicitly update the input fields
+        setStartTimeInput(formatTime(pendingClip.startTime));
+        setEndTimeInput(formatTime(pendingClip.endTime));
+        
+        // Store the clip ID if available
+        if (pendingClip.id) {
+          setCurrentClipId(pendingClip.id);
+        }
+        
         player.seekTo(pendingClip.startTime);
         // Clear the pending clip
         sessionStorage.removeItem('pendingClip');
@@ -210,6 +342,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
       }
     }
   }, [player]);
+
+  // Reset current clip ID when video changes
+  useEffect(() => {
+    // Only reset if we're not loading a pending clip
+    if (!sessionStorage.getItem('pendingClip')) {
+      setCurrentClipId(null);
+    }
+  }, [videoId]);
 
   return (
     <div className="mb-8">
@@ -269,6 +409,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
                       ...prev,
                       start: currentPos
                     }));
+                    // Keep updating currentTime for display purposes
                     setCurrentTime(currentPos);
                   }
                 }
@@ -281,32 +422,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
             </button>
             <input
               type="text"
-              value={formatTime(timeRange.start)}
-              onChange={(e) => {
-                const timeString = e.target.value;
-                // Parse time string (MM:SS or HH:MM:SS format)
-                const timeParts = timeString.split(':').map(part => parseInt(part, 10));
-                let seconds = 0;
-                
-                if (timeParts.length === 2) {
-                  // MM:SS format
-                  seconds = timeParts[0] * 60 + timeParts[1];
-                } else if (timeParts.length === 3) {
-                  // HH:MM:SS format
-                  seconds = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2];
-                }
-                
-                if (!isNaN(seconds) && seconds >= 0 && seconds < timeRange.end) {
-                  setTimeRange(prev => ({
-                    ...prev,
-                    start: seconds
-                  }));
-                  
-                  if (player && currentTime < seconds) {
-                    player.seekTo(seconds);
-                  }
-                }
-              }}
+              value={startTimeInput}
+              onChange={handleStartTimeChange}
+              onBlur={() => handleTimeInputBlur('start')}
+              onKeyDown={(e) => handleTimeInputKeyDown(e, 'start')}
               className="w-20 px-2 py-1 border rounded text-center"
             />
           </div>
@@ -321,6 +440,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
                       ...prev,
                       end: currentPos
                     }));
+                    // Keep updating currentTime for display purposes
                     setCurrentTime(currentPos);
                   }
                 }
@@ -333,28 +453,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
             </button>
             <input
               type="text"
-              value={formatTime(timeRange.end)}
-              onChange={(e) => {
-                const timeString = e.target.value;
-                // Parse time string (MM:SS or HH:MM:SS format)
-                const timeParts = timeString.split(':').map(part => parseInt(part, 10));
-                let seconds = 0;
-                
-                if (timeParts.length === 2) {
-                  // MM:SS format
-                  seconds = timeParts[0] * 60 + timeParts[1];
-                } else if (timeParts.length === 3) {
-                  // HH:MM:SS format
-                  seconds = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2];
-                }
-                
-                if (!isNaN(seconds) && seconds > timeRange.start && seconds <= duration) {
-                  setTimeRange(prev => ({
-                    ...prev,
-                    end: seconds
-                  }));
-                }
-              }}
+              value={endTimeInput}
+              onChange={handleEndTimeChange}
+              onBlur={() => handleTimeInputBlur('end')}
+              onKeyDown={(e) => handleTimeInputKeyDown(e, 'end')}
               className="w-20 px-2 py-1 border rounded text-center"
             />
           </div>
@@ -380,15 +482,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
                 ...prev,
                 start: newStart,
               }));
-              
-              // Seek the video to the new start position
-              if (player) {
-                player.seekTo(newStart);
-                // If the video is not playing, update the current time display
-                if (!isPlaying) {
-                  setCurrentTime(newStart);
-                }
-              }
             }}
             className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb dark:bg-gray-700"
           />
@@ -408,32 +501,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId, onVideoChange }) => 
                 ...prev,
                 end: newEnd,
               }));
-              
-              // If current playback position is beyond the new end,
-              // seek to the new end position
-              if (player && currentTime > newEnd) {
-                player.seekTo(newEnd);
-                // If the video is not playing, update the current time display
-                if (!isPlaying) {
-                  setCurrentTime(newEnd);
-                }
-              }
             }}
             className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb dark:bg-gray-700"
           />
         </div>
         
         <div className="mt-4 flex justify-between items-center">
-          <button
-            onClick={handleSaveClip}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-          >
-            <FaBookmark /> Save Clip
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSaveClip}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+              disabled={!currentClipId && overwriteMode}
+            >
+              <FaBookmark /> Save Clip
+            </button>
+            
+            <div className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                id="overwrite-toggle"
+                checked={overwriteMode}
+                onChange={() => setOverwriteMode(!overwriteMode)}
+                className="w-4 h-4"
+                disabled={!currentClipId}
+              />
+              <label 
+                htmlFor="overwrite-toggle" 
+                className={`text-sm ${!currentClipId ? 'text-gray-400' : ''}`}
+                title={!currentClipId ? 'Load a saved clip first to enable overwrite mode' : 'Overwrite the currently loaded clip'}
+              >
+                Overwrite
+              </label>
+            </div>
+          </div>
           
           {saveSuccess && (
             <span className="text-green-600 dark:text-green-400 animate-pulse">
-              Clip saved successfully!
+              Clip {overwriteMode ? 'updated' : 'saved'} successfully!
             </span>
           )}
         </div>

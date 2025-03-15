@@ -10,17 +10,23 @@ import { getSavedClips, updateLastPlayed } from '../utils/storage';
 export default function Home() {
   const [videoId, setVideoId] = useState<string>('');
   const [savedClips, setSavedClips] = useState<SavedClip[]>([]);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(Date.now());
 
   // Load saved clips on initial render
   useEffect(() => {
     const clips = getSavedClips();
     setSavedClips(clips);
-  }, []);
+  }, [refreshTrigger]);
 
   // Handle selecting a clip
   const handleSelectClip = (clip: SavedClip) => {
     setVideoId(clip.videoId);
     updateLastPlayed(clip.videoId);
+  };
+
+  // Handle clip save/delete to refresh the view
+  const handleClipsChange = () => {
+    setRefreshTrigger(Date.now());
   };
 
   return (
@@ -29,12 +35,21 @@ export default function Home() {
         <Header />
         <VideoUrlForm onVideoIdChange={setVideoId} />
         
-        {videoId && <VideoPlayer videoId={videoId} onVideoChange={setVideoId} />}
+        {videoId && (
+          <VideoPlayer 
+            videoId={videoId} 
+            onVideoChange={setVideoId} 
+            onClipSaved={handleClipsChange}
+          />
+        )}
         
         {!videoId && (
           <>
             <WelcomeMessage />
-            <SavedClipsView onSelectClip={handleSelectClip} />
+            <SavedClipsView 
+              onSelectClip={handleSelectClip} 
+              refreshTrigger={refreshTrigger}
+            />
           </>
         )}
       </div>

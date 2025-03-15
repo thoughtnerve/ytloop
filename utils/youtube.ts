@@ -10,14 +10,14 @@ export const extractVideoId = (url: string): string | null => {
 };
 
 /**
- * Formats seconds to MM:SS format
+ * Formats seconds to MM:SS format with proper padding
  * @param seconds Time in seconds
  * @returns Formatted time string
  */
 export const formatTime = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
 };
 
 /**
@@ -30,11 +30,21 @@ export const getThumbnailUrl = (videoId: string): string => {
 };
 
 /**
- * Gets the video title from YouTube (placeholder function)
- * In a real app, you would use the YouTube API to get the actual title
+ * Gets the video title from YouTube using our API
  * @param videoId YouTube video ID
- * @returns Video title
+ * @returns Promise that resolves to the video title
  */
-export const getVideoTitle = (videoId: string): string => {
-  return `YouTube Video (${videoId})`;
+export const getVideoTitle = async (videoId: string): Promise<string> => {
+  try {
+    const response = await fetch(`/api/video-info?videoId=${videoId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video info: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    return data.title || `YouTube Video (${videoId})`;
+  } catch (error) {
+    console.error('Error fetching video title:', error);
+    return `YouTube Video (${videoId})`;
+  }
 }; 

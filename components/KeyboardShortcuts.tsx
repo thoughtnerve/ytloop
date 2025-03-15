@@ -7,8 +7,8 @@ const KeyboardShortcuts: React.FC = () => {
       <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <li>Space: Play/Pause</li>
         <li>R: Restart from start point</li>
-        <li>Left Arrow: -5 seconds</li>
-        <li>Right Arrow: +5 seconds</li>
+        <li>Ctrl + Left Arrow: -5 seconds</li>
+        <li>Ctrl + Right Arrow: +5 seconds</li>
       </ul>
     </div>
   );

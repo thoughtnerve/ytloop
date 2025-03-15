@@ -5,6 +5,7 @@ import SavedClipItem from './SavedClipItem';
 
 interface SavedClipsViewProps {
   onSelectClip: (clip: SavedClip) => void;
+  refreshTrigger?: number; // Timestamp to trigger refresh
 }
 
 // Helper type for organizing clips by video
@@ -16,7 +17,7 @@ interface VideoClips {
   lastPlayed: number; // Timestamp when the video was last played
 }
 
-const SavedClipsView: React.FC<SavedClipsViewProps> = ({ onSelectClip }) => {
+const SavedClipsView: React.FC<SavedClipsViewProps> = ({ onSelectClip, refreshTrigger }) => {
   const [videoClips, setVideoClips] = useState<VideoClips[]>([]);
 
   // Load saved clips from local storage and organize by video
@@ -50,7 +51,7 @@ const SavedClipsView: React.FC<SavedClipsViewProps> = ({ onSelectClip }) => {
     organizedClips.sort((a, b) => b.lastPlayed - a.lastPlayed);
     
     setVideoClips(organizedClips);
-  }, []);
+  }, [refreshTrigger]); // Re-run when refreshTrigger changes
 
   // Handle clip deletion
   const handleDeleteClip = (clipId: string) => {

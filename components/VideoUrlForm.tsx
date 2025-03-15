@@ -7,12 +7,23 @@ interface VideoUrlFormProps {
 
 const VideoUrlForm: React.FC<VideoUrlFormProps> = ({ onVideoIdChange }) => {
   const [inputUrl, setInputUrl] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = extractVideoId(inputUrl);
     if (id) {
-      onVideoIdChange(id);
+      setIsLoading(true);
+      try {
+        // Pre-fetch the video info to ensure the title is cached
+        await fetch(`/api/video-info?videoId=${id}`);
+        onVideoIdChange(id);
+      } catch (error) {
+        console.error('Error pre-fetching video info:', error);
+        onVideoIdChange(id); // Still load the video even if pre-fetch fails
+      } finally {
+        setIsLoading(false);
+      }
     } else {
       alert('Invalid YouTube URL');
     }
@@ -28,12 +39,14 @@ const VideoUrlForm: React.FC<VideoUrlFormProps> = ({ onVideoIdChange }) => {
           placeholder="Enter YouTube URL"
           className="flex-grow p-3 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
           required
+          disabled={isLoading}
         />
         <button
           type="submit"
           className="bg-primary hover:bg-secondary text-white font-bold py-3 px-6 rounded-lg transition-colors"
+          disabled={isLoading}
         >
-          Load Video
+          {isLoading ? 'Loading...' : 'Load Video'}
         </button>
       </div>
     </form>
